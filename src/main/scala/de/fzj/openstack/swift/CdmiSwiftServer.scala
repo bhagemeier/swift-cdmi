@@ -2,9 +2,7 @@ package de.fzj.openstack.swift
 
 import java.lang.reflect.ParameterizedType
 import java.lang.reflect.Type
-
 import scala.collection.JavaConversions.iterableAsScalaIterable
-
 import org.apache.commons.codec.binary.Base64
 import org.bouncycastle.cms.CMSSignedData
 import org.codehaus.jackson.`type`.TypeReference
@@ -17,19 +15,21 @@ import org.javaswift.joss.client.factory.AuthenticationMethod.AccessProvider
 import org.javaswift.joss.command.shared.identity.access.AccessTenant
 import org.javaswift.joss.model.Access
 import org.javaswift.joss.model.Account
-
 import com.twitter.app.App
 import com.twitter.app.GlobalFlag
 import com.twitter.logging.Level
 import com.twitter.logging.Logging
 import com.twitter.util.Future
-
 import gr.grnet.cdmi.service.CdmiRestService
 import gr.grnet.cdmi.service.CdmiRestServiceHandlers
 import gr.grnet.cdmi.service.CdmiRestServiceMethods
 import gr.grnet.cdmi.service.CdmiRestServiceResponse
 import gr.grnet.cdmi.service.CdmiRestServiceTypes
 import gr.grnet.common.json.Json
+import gr.grnet.cdmi.model.ContainerModel
+import gr.grnet.cdmi.model.Model
+
+import scala.collection.immutable
 
 /**
  * @author bjoernh
@@ -79,7 +79,7 @@ object CdmiSwiftServer extends CdmiRestService
     
     Future(response(request, Status.Ok, CdmiMediaType.Application_CdmiCapability, jsonCaps))
   }*/
-  
+
   override def GET_container_cdmi(request: Request, containerPath: List[String]) : Future[Response]= {
     // 1. if x-auth-token is set, try and retrieve the account URL, as it should
     //    be handled transparently for CDMI
@@ -169,7 +169,28 @@ object CdmiSwiftServer extends CdmiRestService
    * 
    * TODO: must be implemented, see super class method
    */
-  override def DELETE_object_or_queue_or_queuevalue_cdmi(request: Request, path: List[String]) =
+  override def DELETE_object_or_queue_or_queuevalue_cdmi(request: Request, path: List[String]) = {
     notImplemented(request)
+  }
+
+  override def handleRootCall(request: Request) : Future[Response] = {
+    val account = createJossAccount(request.headers().get("x-auth-token"))
+    val swContainers = account.list()
+    val swContainerNames = (for(swContainer <- swContainers) yield swContainer.getName).asInstanceOf[immutable.Seq[String]]
+
+    for(containerName <- swContainerNames) println(containerName)
+
+    val container = ContainerModel(
+      objectID = "/",
+      objectName = "/",
+      parentURI = "/",
+      parentID = "/",
+      domainURI = "",
+      childrenrange = if (swContainers.size() == 0) "" else "0-" + (swContainers.size()-1).toString(),
+      children = swContainerNames
+      )
+
+      okAppCdmiContainer(request, Json.objectToJsonString(container))
+  }
 
 }
