@@ -2,7 +2,10 @@ package de.fzj.openstack.swift
 
 import java.lang.reflect.ParameterizedType
 import java.lang.reflect.Type
+
 import scala.collection.JavaConversions.iterableAsScalaIterable
+import scala.collection.immutable
+
 import org.apache.commons.codec.binary.Base64
 import org.bouncycastle.cms.CMSSignedData
 import org.codehaus.jackson.`type`.TypeReference
@@ -15,27 +18,23 @@ import org.javaswift.joss.client.factory.AuthenticationMethod.AccessProvider
 import org.javaswift.joss.command.shared.identity.access.AccessTenant
 import org.javaswift.joss.model.Access
 import org.javaswift.joss.model.Account
+
 import com.twitter.app.App
 import com.twitter.app.GlobalFlag
+import com.twitter.finagle.http.Status
 import com.twitter.logging.Level
 import com.twitter.logging.Logging
 import com.twitter.util.Future
+
+import gr.grnet.cdmi.model.ContainerModel
+import gr.grnet.cdmi.model.ObjectModel
 import gr.grnet.cdmi.service.CdmiRestService
 import gr.grnet.cdmi.service.CdmiRestServiceHandlers
 import gr.grnet.cdmi.service.CdmiRestServiceMethods
 import gr.grnet.cdmi.service.CdmiRestServiceResponse
 import gr.grnet.cdmi.service.CdmiRestServiceTypes
-import gr.grnet.common.json.Json
-import gr.grnet.cdmi.model.ContainerModel
-import gr.grnet.cdmi.model.Model
-import scala.collection.immutable
-import com.twitter.finagle.http.Status
-import gr.grnet.common.http.IMediaType
 import gr.grnet.common.http.StdMediaType
-import org.jboss.netty.handler.codec.http.HttpHeaders
-import com.google.common.net.HttpHeaders
-import gr.grnet.cdmi.model.ObjectModel
-import gr.grnet.cdmi.model.ObjectModel
+import gr.grnet.common.json.Json
 
 /**
  * @author bjoernh
@@ -75,7 +74,7 @@ object CdmiSwiftServer extends CdmiRestService
   /**
    * This may need to be overridden to allow for backend specific
    * capabilities. Right now, we'll use the default set.
-   * 
+   *
    * TODO this was just a development test, so commented for now
    */
   /*override def GET_capabilities(request : Request) : Future[Response] = {
@@ -86,19 +85,40 @@ object CdmiSwiftServer extends CdmiRestService
     Future(response(request, Status.Ok, CdmiMediaType.Application_CdmiCapability, jsonCaps))
   }*/
 
-  override def GET_container_cdmi(request: Request, containerPath: List[String]) : Future[Response]= {
-    // 1. if x-auth-token is set, try and retrieve the account URL, as it should
-    //    be handled transparently for CDMI
-    // 2. if x-auth-token is not set, forward the request and get Keystone URL
-    //    from Swift (we could also use our own authURL, but would not like
-    //    to duplicate information)
-    //    a) return 401 with www-authenticate: Keystone ... header
-    //         next attempt should contain x-auth-token
+  override def GET_container_cdmi(request: Request, containerPath: List[String]): Future[Response] = {
     val account = createJossAccount(request.headers.get("x-auth-token"))
+    val (container, path) = extractContainerAndPath(containerPath)
+    println("Container: " + container + "  Path: " + path)
+    val containerElements = account.getContainer(container).listDirectory(path, '/', null, 1000)
+    for(el <- containerElements) println(el.getName)
+    val elementNames = (for (element <- containerElements) yield element.getName).asInstanceOf[immutable.Seq[String]]
+    val cModel = ContainerModel(
+      objectID = containerPath.mkString("/")+"/",
+      objectName = containerPath.mkString("/")+"/",
+      parentURI = containerPath.take(containerPath.length - 1).mkString("/") + "/",
+      parentID = containerPath.take(containerPath.length - 1).mkString("/") + "/",
+      domainURI = "",
+      childrenrange = if (elementNames.length == 0) "" else "0-" + (elementNames.length - 1).toString(),
+      children = elementNames)
+    okAppCdmiContainer(request, Json.objectToJsonString(cModel))
+  }
 
-    //if containerPath
+  private def DELETE_object_(request: Request, objectPath: List[String]) : Future[Response] = {
+    val account = createJossAccount(request.headers().get("x-auth-token"))
+    val (container, path) = extractContainerAndPath(objectPath)
+    account.getContainer(container).getObject(path).delete()
 
-    notImplemented(request)
+    // TODO return HTTP "204 No Content" rather than "200 OK"
+    // TODO proper error handling
+    okTextPlain(request)
+  }
+
+  override def DELETE_object_cdmi(request: Request, objectPath: List[String]) : Future[Response] = {
+    DELETE_object_(request, objectPath)
+  }
+
+  override def DELETE_object_noncdmi(request: Request, objectPath: List[String]) : Future[Response] = {
+    DELETE_object_(request, objectPath)
   }
 
   override def GET_object_cdmi(request: Request, objectPath: List[String]): Future[Response] = {
@@ -224,16 +244,14 @@ object CdmiSwiftServer extends CdmiRestService
    * 
    * TODO: must be implemented, see super class method
    */
-  override def DELETE_object_or_queue_or_queuevalue_cdmi(request: Request, path: List[String]) = {
-    notImplemented(request)
+  override def DELETE_object_or_queue_or_queuevalue_cdmi(request: Request, reqPath: List[String]) = {
+    DELETE_object_cdmi(request, reqPath)
   }
 
   override def handleRootCall(request: Request) : Future[Response] = {
     val account = createJossAccount(request.headers().get("x-auth-token"))
     val swContainers = account.list()
-    val swContainerNames = (for(swContainer <- swContainers) yield swContainer.getName).asInstanceOf[immutable.Seq[String]]
-
-    for(containerName <- swContainerNames) println(containerName)
+    val swContainerNames = (for(swContainer <- swContainers) yield swContainer.getName + "/").asInstanceOf[immutable.Seq[String]]
 
     val container = ContainerModel(
       objectID = "/",
