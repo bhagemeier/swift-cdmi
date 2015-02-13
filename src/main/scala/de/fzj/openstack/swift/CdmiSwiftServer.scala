@@ -104,8 +104,7 @@ object CdmiSwiftServer extends CdmiRestService
   override def GET_object_cdmi(request: Request, objectPath: List[String]): Future[Response] = {
     val account = createJossAccount(request.headers.get("x-auth-token"))
 
-    val container = objectPath head
-    val path = objectPath.tail mkString "/"// match { case "" => "/"; case s => "/" + s }
+    val (container, path) = extractContainerAndPath(objectPath)
 
     // TODO need to deal with "sub-directories" here, as the path gets encoded
     //      and each "/" becomes a "%2F"
@@ -136,6 +135,28 @@ object CdmiSwiftServer extends CdmiRestService
     val json = Json.objectToJsonString(model)
 
     okAppCdmiObject(request, json)
+  }
+
+  override def GET_object_noncdmi(request: Request, objectPath: List[String]): Future[Response] = {
+    val account = createJossAccount(request.headers.get("x-auth-token"))
+
+    val (container, path) = extractContainerAndPath(objectPath)
+
+    val swObjectHdl = account.getContainer(container).getObject(path)
+    val swObject = swObjectHdl.downloadObject
+    val content_type = swObjectHdl.getContentType
+
+    val response = Response(request)
+    response.headers().set("content-type", content_type)
+    response.write(swObject)
+
+    Future(response)
+  }
+
+  private def extractContainerAndPath(objectPath: List[String]) : (String, String) = {
+    val container = objectPath head
+    val path = objectPath.tail mkString "/"// match { case "" => "/"; case s => "/" + s }
+    (container, path)
   }
 
   private def createJossAccount(x_auth_token: String): Account = {
