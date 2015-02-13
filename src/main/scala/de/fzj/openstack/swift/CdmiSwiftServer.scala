@@ -28,8 +28,14 @@ import gr.grnet.cdmi.service.CdmiRestServiceTypes
 import gr.grnet.common.json.Json
 import gr.grnet.cdmi.model.ContainerModel
 import gr.grnet.cdmi.model.Model
-
 import scala.collection.immutable
+import com.twitter.finagle.http.Status
+import gr.grnet.common.http.IMediaType
+import gr.grnet.common.http.StdMediaType
+import org.jboss.netty.handler.codec.http.HttpHeaders
+import com.google.common.net.HttpHeaders
+import gr.grnet.cdmi.model.ObjectModel
+import gr.grnet.cdmi.model.ObjectModel
 
 /**
  * @author bjoernh
@@ -99,16 +105,40 @@ object CdmiSwiftServer extends CdmiRestService
     val account = createJossAccount(request.headers.get("x-auth-token"))
 
     val container = objectPath head
-    val path = objectPath.tail mkString "/" match { case "" => "/"; case s => "/" + s }
+    val path = objectPath.tail mkString "/"// match { case "" => "/"; case s => "/" + s }
 
-    val swObject = account.getContainer(container).getObject(path)
+    // TODO need to deal with "sub-directories" here, as the path gets encoded
+    //      and each "/" becomes a "%2F"
+    // Asked about this behaviour at https://github.com/javaswift/joss/issues/77
+    // may need a separate branch of JOSS to get going
+    val swObjectHdl = account.getContainer(container).getObject(path)
+    val swObject = swObjectHdl.downloadObject()
+    val valuetransferencoding = if(swObjectHdl.getContentType.equals("text/plain")) { "utf-8"} else { "base64" }
+    val encodedObject = if (valuetransferencoding.equals("base64")) {
+      new String(Base64.encodeBase64(swObject))
+    } else {
+      new String(swObject)
+    }
 
-    val json = Json.objectToJsonString(swObject)
+    val model = ObjectModel(
+        objectID = objectPath.tail.mkString("/"),
+        objectName = objectPath.tail.mkString("/"),
+        parentURI = objectPath.take(objectPath.length-1).mkString("/"),
+        parentID = objectPath.take(objectPath.length-1).mkString("/"),
+        domainURI = "",
+        mimetype = swObjectHdl.getContentType,
+        valuetransferencoding = valuetransferencoding,
+        metadata = Map[String, String](),
+        valuerange = "0-" + (swObject.length-1).toString(),
+        value = encodedObject
+    )
+
+    val json = Json.objectToJsonString(model)
 
     okAppCdmiObject(request, json)
   }
 
-  def createJossAccount(x_auth_token: String): Account = {
+  private def createJossAccount(x_auth_token: String): Account = {
     object tokenAccessProvider extends AccessProvider {
       val b64token = x_auth_token.replace('-', '/')
       val decodedToken = Base64.decodeBase64(b64token);
@@ -143,8 +173,12 @@ object CdmiSwiftServer extends CdmiRestService
     config.setAuthenticationMethod(AuthenticationMethod.EXTERNAL)
     config.setAuthUrl(getKeystoneTokenEndpoint(tokenAccessProvider.access))
     config.setAccessProvider(tokenAccessProvider)
-    config.setTenantName(tokenAccessProvider.access.token.tenant.name)
+    //config.setTenantName(tokenAccessProvider.access.token.tenant.name)
+    config.setTenantId(tokenAccessProvider.access.token.tenant.id)
     config.setUsername(tokenAccessProvider.access.user.name)
+    config.setAllowReauthenticate(false)
+    config.setAllowCaching(true)
+    config.setDelimiter('/')
     val af = new AccountFactory(config)
     af.createAccount()
   }
@@ -191,6 +225,18 @@ object CdmiSwiftServer extends CdmiRestService
       )
 
       okAppCdmiContainer(request, Json.objectToJsonString(container))
+  }
+
+  /**
+   * This method is probably not needed as a call to root is usually sent as
+   *   GET / HTTP/1.1
+   *   such that the slash will be there
+   */
+  override def handleRootNoSlashCall(request: Request) : Future[Response] = {
+    val resp = response(request, Status.MovedPermanently, StdMediaType.Text_Plain, "")
+    val reqLoc = request.getUri()
+    resp.headers().set("Location", reqLoc + "/")
+    Future(resp)
   }
 
 }
