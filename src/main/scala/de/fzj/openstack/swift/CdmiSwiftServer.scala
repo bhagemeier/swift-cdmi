@@ -89,7 +89,7 @@ object CdmiSwiftServer extends CdmiRestService
     val account = createJossAccount(request.headers.get("x-auth-token"))
     val (container, path) = extractContainerAndPath(containerPath, true)
     val containerElements = account.getContainer(container).listDirectory(path, '/', null, 1000)
-    val elementNames = (for (element <- containerElements) yield element.getName).asInstanceOf[immutable.Seq[String]]
+    val elementNames = (for (element <- containerElements) yield element.getName.replaceFirst(path, "")).asInstanceOf[immutable.Seq[String]]
     val cModel = ContainerModel(
       objectID = containerPath.mkString("/")+"/",
       objectName = containerPath.mkString("/")+"/",
