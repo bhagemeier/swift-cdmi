@@ -87,10 +87,8 @@ object CdmiSwiftServer extends CdmiRestService
 
   override def GET_container_cdmi(request: Request, containerPath: List[String]): Future[Response] = {
     val account = createJossAccount(request.headers.get("x-auth-token"))
-    val (container, path) = extractContainerAndPath(containerPath)
-    println("Container: " + container + "  Path: " + path)
+    val (container, path) = extractContainerAndPath(containerPath, true)
     val containerElements = account.getContainer(container).listDirectory(path, '/', null, 1000)
-    for(el <- containerElements) println(el.getName)
     val elementNames = (for (element <- containerElements) yield element.getName).asInstanceOf[immutable.Seq[String]]
     val cModel = ContainerModel(
       objectID = containerPath.mkString("/")+"/",
@@ -105,7 +103,7 @@ object CdmiSwiftServer extends CdmiRestService
 
   private def DELETE_object_(request: Request, objectPath: List[String]) : Future[Response] = {
     val account = createJossAccount(request.headers().get("x-auth-token"))
-    val (container, path) = extractContainerAndPath(objectPath)
+    val (container, path) = extractContainerAndPath(objectPath, false)
     account.getContainer(container).getObject(path).delete()
 
     // TODO return HTTP "204 No Content" rather than "200 OK"
@@ -124,7 +122,7 @@ object CdmiSwiftServer extends CdmiRestService
   override def GET_object_cdmi(request: Request, objectPath: List[String]): Future[Response] = {
     val account = createJossAccount(request.headers.get("x-auth-token"))
 
-    val (container, path) = extractContainerAndPath(objectPath)
+    val (container, path) = extractContainerAndPath(objectPath, false)
 
     // TODO need to deal with "sub-directories" here, as the path gets encoded
     //      and each "/" becomes a "%2F"
@@ -160,7 +158,7 @@ object CdmiSwiftServer extends CdmiRestService
   override def GET_object_noncdmi(request: Request, objectPath: List[String]): Future[Response] = {
     val account = createJossAccount(request.headers.get("x-auth-token"))
 
-    val (container, path) = extractContainerAndPath(objectPath)
+    val (container, path) = extractContainerAndPath(objectPath, false)
 
     val swObjectHdl = account.getContainer(container).getObject(path)
     val swObject = swObjectHdl.downloadObject
@@ -173,9 +171,12 @@ object CdmiSwiftServer extends CdmiRestService
     Future(response)
   }
 
-  private def extractContainerAndPath(objectPath: List[String]) : (String, String) = {
+  private def extractContainerAndPath(objectPath: List[String], appendTrailingSlash: Boolean) : (String, String) = {
     val container = objectPath head
-    val path = objectPath.tail mkString "/"// match { case "" => "/"; case s => "/" + s }
+    // TODO the following expression smells, there must be a better, shorter way
+    val path = {if (appendTrailingSlash) {(objectPath.tail mkString "/") + "/" }
+      else { objectPath.tail mkString "/"}}
+      match { case "/" => ""; case s => s}
     (container, path)
   }
 
