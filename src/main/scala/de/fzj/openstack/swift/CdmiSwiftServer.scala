@@ -2,10 +2,8 @@ package de.fzj.openstack.swift
 
 import java.lang.reflect.ParameterizedType
 import java.lang.reflect.Type
-
 import scala.collection.JavaConversions.iterableAsScalaIterable
 import scala.collection.immutable
-
 import org.apache.commons.codec.binary.Base64
 import org.bouncycastle.cms.CMSSignedData
 import org.codehaus.jackson.`type`.TypeReference
@@ -18,14 +16,12 @@ import org.javaswift.joss.client.factory.AuthenticationMethod.AccessProvider
 import org.javaswift.joss.command.shared.identity.access.AccessTenant
 import org.javaswift.joss.model.Access
 import org.javaswift.joss.model.Account
-
 import com.twitter.app.App
 import com.twitter.app.GlobalFlag
 import com.twitter.finagle.http.Status
 import com.twitter.logging.Level
 import com.twitter.logging.Logging
 import com.twitter.util.Future
-
 import gr.grnet.cdmi.model.ContainerModel
 import gr.grnet.cdmi.model.ObjectModel
 import gr.grnet.cdmi.service.CdmiRestService
@@ -35,6 +31,7 @@ import gr.grnet.cdmi.service.CdmiRestServiceResponse
 import gr.grnet.cdmi.service.CdmiRestServiceTypes
 import gr.grnet.common.http.StdMediaType
 import gr.grnet.common.json.Json
+import java.net.URLDecoder
 
 /**
  * @author bjoernh
@@ -124,11 +121,8 @@ object CdmiSwiftServer extends CdmiRestService
 
     val (container, path) = extractContainerAndPath(objectPath, false)
 
-    // TODO need to deal with "sub-directories" here, as the path gets encoded
-    //      and each "/" becomes a "%2F"
-    // Asked about this behaviour at https://github.com/javaswift/joss/issues/77
-    // may need a separate branch of JOSS to get going
     val swObjectHdl = account.getContainer(container).getObject(path)
+    // WARNING The following only works with a patched version fixing issue #77 
     val swObject = swObjectHdl.downloadObject()
     val valuetransferencoding = if(swObjectHdl.getContentType.equals("text/plain")) { "utf-8"} else { "base64" }
     val encodedObject = if (valuetransferencoding.equals("base64")) {
@@ -174,9 +168,9 @@ object CdmiSwiftServer extends CdmiRestService
   private def extractContainerAndPath(objectPath: List[String], appendTrailingSlash: Boolean) : (String, String) = {
     val container = objectPath head
     // TODO the following expression smells, there must be a better, shorter way
-    val path = {if (appendTrailingSlash) {(objectPath.tail mkString "/") + "/" }
+    val path = URLDecoder.decode({if (appendTrailingSlash) {(objectPath.tail mkString "/") + "/" }
       else { objectPath.tail mkString "/"}}
-      match { case "/" => ""; case s => s}
+      match { case "/" => ""; case s => s}, "UTF-8")
     (container, path)
   }
 
